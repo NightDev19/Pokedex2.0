@@ -1,0 +1,4 @@
+.modal-content {
+  max-height: 80vh; /* Set a maximum height for the modal content */
+  overflow-y: auto; /* Enable vertical scrolling */
+}
