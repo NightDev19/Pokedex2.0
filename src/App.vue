@@ -8,7 +8,21 @@ const data = reactive({
 </script>
 
 <template>
-    <h1>{{ data.name }} {{ data.version }}</h1>
+    <div>
+        <header>
+            <h1>{{ data.name }} {{ data.version }}</h1>
+        </header>
+
+        <!-- Render route views here -->
+        <router-view />
+    </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+header {
+    background: #ef5350;
+    color: white;
+    padding: 1rem;
+    font-size: 1.5rem;
+}
+</style>
