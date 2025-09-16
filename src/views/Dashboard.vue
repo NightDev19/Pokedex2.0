@@ -28,7 +28,7 @@
             <Card
                 v-for="p in displayList"
                 :key="p.id + '-' + p.name"
-                class="flex flex-col items-center p-4"
+                class="flex flex-col items-center p-4 card"
             >
                 <div class="w-full flex justify-center">
                     <img
@@ -48,7 +48,12 @@
                 </div>
 
                 <div class="w-full mt-3 flex gap-2">
-                    <Button class="flex-1" size="sm" @click="showDetails(p)">
+                    <!-- pass event to capture img.src -->
+                    <Button
+                        class="flex-1"
+                        size="sm"
+                        @click="showDetails(p, $event)"
+                    >
                         Details
                     </Button>
                     <Button
@@ -83,11 +88,10 @@
                 <div class="mt-4 flex gap-6">
                     <img
                         :src="
-                            selected.sprites?.front_default ||
-                            spriteUrl(selected.name, selected.id)
+                            selectedImg || spriteUrl(selected.name, selected.id)
                         "
                         :alt="selected.name"
-                        class="w-32 h-32 object-contain"
+                        class="w-32 h-32 object-contain pokemon-img"
                     />
                     <div>
                         <p><strong>ID:</strong> {{ selected.id }}</p>
@@ -128,10 +132,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from "vue";
-import type { PokemonSummary, PokemonDetail } from "@/composables/usePokemon"; // types exported by your composable
+import type { PokemonSummary, PokemonDetail } from "@/composables/usePokemon";
 import { usePokemonApi } from "@/composables/usePokemon";
 
-// shadcn-vue components (CLI will place these under src/components/ui/...)
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,6 +153,7 @@ const {
 const query = ref("");
 const displayList = ref<PokemonSummary[]>([]);
 const selected = ref<PokemonDetail | null>(null);
+const selectedImg = ref<string | null>(null); // NEW: store clicked image src
 
 // load Gen 1 (first 151) on mount
 onMounted(async () => {
@@ -157,70 +161,39 @@ onMounted(async () => {
     displayList.value = pokemons.value.slice();
 });
 
-// keep display list in sync if list() is used elsewhere
 watch(pokemons, () => {
     if (!query.value) displayList.value = pokemons.value.slice();
 });
 
 /**
- * Prefer animated GIF from Pokémon Showdown, fall back to official-artwork PNG.
- *
- * Notes (practical):
- *  - Animated GIFs are not provided by the PokeAPI. Play.PokemonShowdown hosts many animated
- *    sprites at /sprites/ani/<normalized-name>.gif. Normalization here is conservative:
- *    lowercase, spaces -> hyphens, strip non-alphanum/hyphen characters.
- *  - Some edge cases (Nidoran♀/♂, forms like "farfetch'd", or regional forms) may not map perfectly.
- *    in those cases the onImageError fallback will use official artwork by numeric id.
+ * Sprite source strategy:
+ *  - Prefer animated GIF from PokeAPI's "versions/generation-v/black-white/animated"
+ *  - Fallback: official-artwork PNG
  */
-function normalizeNameForGif(name = ""): string {
-    return String(name)
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, "-") // spaces to hyphen
-        .replace(/[^a-z0-9-]/g, ""); // strip punctuation/unicode (best-effort)
-}
-
 function spriteUrl(nameOrNameStr: string | number, id?: number): string {
-    // if provided a number-like name (rare here), prefer using the id fallback
     if (
         typeof nameOrNameStr === "number" ||
         (/^\d+$/.test(String(nameOrNameStr)) && id)
     ) {
-        // official artwork (static) as fallback; but try GIF by name if we have name separately
         return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
     }
-
-    const name = String(nameOrNameStr);
-    const norm = normalizeNameForGif(name);
-    // Animated GIF endpoint (preferred)
-    return `https://play.pokemonshowdown.com/sprites/ani/${norm}.gif`;
+    const normId = id || String(nameOrNameStr);
+    // Animated sprite (BW gen V animated set)
+    return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${normId}.gif`;
 }
 
-/**
- * Error handler: fallback chain
- * 1) If current src was the gif (Play.Showdown), try official-artwork PNG (by data-id)
- * 2) If official-artwork fails, try the basic sprites PNG
- * 3) Final fallback: a tiny transparent 1x1 or local placeholder (you may replace path)
- */
 function onImageError(ev: Event) {
     const img = ev.target as HTMLImageElement;
     const current = img.src || "";
-    const dataName = img.getAttribute("data-name") || "";
     const dataId = img.getAttribute("data-id") || "";
 
-    // if we were trying GIF from showdown, fallback to official-artwork by id
-    if (current.includes("play.pokemonshowdown.com/sprites/ani")) {
+    if (current.includes("/animated/")) {
         if (dataId) {
             img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dataId}.png`;
             return;
         }
-        // if id missing, try non-official sprite by normalized name
-        const norm = normalizeNameForGif(dataName);
-        img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${norm}.png`;
-        return;
     }
 
-    // if we were trying official-artwork and failed, try the basic sprite by numeric id
     if (current.includes("official-artwork")) {
         if (dataId) {
             img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${dataId}.png`;
@@ -228,11 +201,9 @@ function onImageError(ev: Event) {
         }
     }
 
-    // final fallback - transparent placeholder (replace with your project's image if desired)
-    img.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; // 1x1 gif
+    img.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
 }
 
-/* helpers used by the modal */
 function isLastType(t: any) {
     return selected.value?.types?.[selected.value.types.length - 1] === t;
 }
@@ -242,7 +213,6 @@ function isLastAbility(a: any) {
     );
 }
 
-/* search / list / show details unchanged logic */
 async function onSearch() {
     const q = (query.value || "").trim();
     if (!q) {
@@ -260,7 +230,18 @@ function resetList() {
     list(1, 151).then(() => (displayList.value = pokemons.value.slice()));
 }
 
-async function showDetails(s: PokemonSummary) {
+// UPDATED: capture clicked card image source
+async function showDetails(s: PokemonSummary, ev: Event) {
+    const imgEl = (ev.currentTarget as HTMLElement)
+        ?.closest(".card")
+        ?.querySelector("img") as HTMLImageElement | null;
+
+    if (imgEl) {
+        selectedImg.value = imgEl.src;
+    } else {
+        selectedImg.value = null;
+    }
+
     const details = await get(s.id || s.name);
     if (details) selected.value = details;
     else {
@@ -275,12 +256,10 @@ function scrollToTop() {
 </script>
 
 <style scoped>
-/* You can add small tweaks here. Primary layout uses Tailwind. */
 .text-muted-foreground {
     color: rgba(100, 116, 139, 1);
 }
 
-/* Subtle float animation + hover lift for Pokémon images. Respect users who prefer reduced motion. */
 @keyframes float-slow {
     0% {
         transform: translateY(0);
@@ -299,6 +278,10 @@ function scrollToTop() {
         filter 220ms;
     will-change: transform;
     animation: float-slow 3.8s ease-in-out infinite;
+
+    /* NEW: make sprites sharp instead of blurry */
+    image-rendering: pixelated;
+    image-rendering: crisp-edges; /* fallback */
 }
 
 .pokemon-img:hover {
@@ -306,7 +289,6 @@ function scrollToTop() {
     filter: drop-shadow(0 8px 18px rgba(15, 23, 42, 0.08));
 }
 
-/* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
     .pokemon-img {
         animation: none !important;
