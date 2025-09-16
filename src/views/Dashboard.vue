@@ -2,20 +2,16 @@
 <template>
     <div class="p-6">
         <div class="flex items-center gap-4 mb-6">
-            <!-- shadcn Input -->
             <Input
                 v-model="query"
                 placeholder="Search by name or id (press Enter or click Search)"
                 @keyup.enter="onSearch"
                 class="flex-1 max-w-md"
             />
-
-            <!-- shadcn Button -->
-            <Button @click="onSearch" :disabled="loading"> Search </Button>
-
-            <Button variant="ghost" @click="resetList" :disabled="loading">
-                Reset
-            </Button>
+            <Button @click="onSearch" :disabled="loading">Search</Button>
+            <Button variant="ghost" @click="resetList" :disabled="loading"
+                >Reset</Button
+            >
         </div>
 
         <div v-if="error" class="mb-4 text-red-600">{{ error }}</div>
@@ -32,11 +28,11 @@
             >
                 <div class="w-full flex justify-center">
                     <img
-                        :src="spriteUrl(p.name, p.id)"
-                        :alt="p.name"
-                        class="w-32 h-32 object-contain select-none pokemon-img"
+                        :src="imageLoaded[p.id] || placeholder"
                         :data-name="p.name"
                         :data-id="p.id"
+                        class="w-32 h-32 object-contain select-none pokemon-img"
+                        @load="() => onImageLoad(p)"
                         @error="onImageError"
                         loading="lazy"
                     />
@@ -48,7 +44,6 @@
                 </div>
 
                 <div class="w-full mt-3 flex gap-2">
-                    <!-- pass event to capture img.src -->
                     <Button
                         class="flex-1"
                         size="sm"
@@ -56,19 +51,11 @@
                     >
                         Details
                     </Button>
-                    <Button
-                        class="flex-1"
-                        size="sm"
-                        variant="outline"
-                        @click="scrollToTop"
-                    >
-                        Top
-                    </Button>
                 </div>
             </Card>
         </div>
 
-        <!-- Simple details modal (native) -->
+        <!-- Modal -->
         <div
             v-if="selected"
             class="fixed inset-0 z-50 flex items-center justify-center"
@@ -88,7 +75,9 @@
                 <div class="mt-4 flex gap-6">
                     <img
                         :src="
-                            selectedImg || spriteUrl(selected.name, selected.id)
+                            selectedImg ||
+                            imageLoaded[selected.id] ||
+                            placeholder
                         "
                         :alt="selected.name"
                         class="w-32 h-32 object-contain pokemon-img"
@@ -127,14 +116,35 @@
                 </div>
             </div>
         </div>
+
+        <!-- Floating Scroll-to-Top Button -->
+        <Button
+            @click="scrollToTop"
+            variant="outline"
+            class="fixed bottom-6 right-6 rounded-full p-3 shadow-lg flex items-center justify-center hover:bg-gray-200 transition"
+        >
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-6 w-6"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+            >
+                <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 15l7-7 7 7"
+                />
+            </svg>
+        </Button>
     </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, reactive, onMounted, watch } from "vue";
 import type { PokemonSummary, PokemonDetail } from "@/composables/usePokemon";
 import { usePokemonApi } from "@/composables/usePokemon";
-
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -149,27 +159,27 @@ const {
     error,
 } = usePokemonApi();
 
-// UI state
 const query = ref("");
 const displayList = ref<PokemonSummary[]>([]);
 const selected = ref<PokemonDetail | null>(null);
-const selectedImg = ref<string | null>(null); // NEW: store clicked image src
+const selectedImg = ref<string | null>(null);
 
-// load Gen 1 (first 151) on mount
+// Progressive loading
+const placeholder =
+    "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+const imageLoaded = reactive<Record<number, string>>({});
+
 onMounted(async () => {
     await list(1, 151);
     displayList.value = pokemons.value.slice();
+    loadAllImages(displayList.value);
 });
 
 watch(pokemons, () => {
     if (!query.value) displayList.value = pokemons.value.slice();
+    loadAllImages(displayList.value);
 });
 
-/**
- * Sprite source strategy:
- *  - Prefer animated GIF from PokeAPI's "versions/generation-v/black-white/animated"
- *  - Fallback: official-artwork PNG
- */
 function spriteUrl(nameOrNameStr: string | number, id?: number): string {
     if (
         typeof nameOrNameStr === "number" ||
@@ -178,30 +188,32 @@ function spriteUrl(nameOrNameStr: string | number, id?: number): string {
         return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
     }
     const normId = id || String(nameOrNameStr);
-    // Animated sprite (BW gen V animated set)
     return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${normId}.gif`;
 }
 
-function onImageError(ev: Event) {
-    const img = ev.target as HTMLImageElement;
-    const current = img.src || "";
+// Preload images asynchronously
+function loadAllImages(list: PokemonSummary[]) {
+    list.forEach((p) => {
+        const img = new Image();
+        img.src = spriteUrl(p.name, p.id);
+        img.onload = () => {
+            imageLoaded[p.id] = img.src;
+        };
+        img.onerror = () => onImageError(img as any);
+    });
+}
+
+function onImageLoad(p: PokemonSummary) {
+    // no-op because images loaded via preload
+}
+
+function onImageError(ev: Event | HTMLImageElement) {
+    let img: HTMLImageElement;
+    if (ev instanceof Event) img = ev.target as HTMLImageElement;
+    else img = ev;
     const dataId = img.getAttribute("data-id") || "";
-
-    if (current.includes("/animated/")) {
-        if (dataId) {
-            img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dataId}.png`;
-            return;
-        }
-    }
-
-    if (current.includes("official-artwork")) {
-        if (dataId) {
-            img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${dataId}.png`;
-            return;
-        }
-    }
-
-    img.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+    if (dataId)
+        img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dataId}.png`;
 }
 
 function isLastType(t: any) {
@@ -218,29 +230,29 @@ async function onSearch() {
     if (!q) {
         await list(1, 151);
         displayList.value = pokemons.value.slice();
+        loadAllImages(displayList.value);
         return;
     }
-
     const results = await search(q, 151);
     displayList.value = results;
+    loadAllImages(displayList.value);
 }
 
 function resetList() {
     query.value = "";
-    list(1, 151).then(() => (displayList.value = pokemons.value.slice()));
+    list(1, 151).then(() => {
+        displayList.value = pokemons.value.slice();
+        loadAllImages(displayList.value);
+    });
 }
 
-// UPDATED: capture clicked card image source
+// Show details modal
 async function showDetails(s: PokemonSummary, ev: Event) {
     const imgEl = (ev.currentTarget as HTMLElement)
         ?.closest(".card")
         ?.querySelector("img") as HTMLImageElement | null;
 
-    if (imgEl) {
-        selectedImg.value = imgEl.src;
-    } else {
-        selectedImg.value = null;
-    }
+    selectedImg.value = imgEl?.src || null;
 
     const details = await get(s.id || s.name);
     if (details) selected.value = details;
@@ -278,10 +290,8 @@ function scrollToTop() {
         filter 220ms;
     will-change: transform;
     animation: float-slow 3.8s ease-in-out infinite;
-
-    /* NEW: make sprites sharp instead of blurry */
     image-rendering: pixelated;
-    image-rendering: crisp-edges; /* fallback */
+    image-rendering: crisp-edges;
 }
 
 .pokemon-img:hover {
