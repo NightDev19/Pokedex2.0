@@ -205,6 +205,7 @@ function loadAllImages(list: PokemonSummary[]) {
 
 function onImageLoad(p: PokemonSummary) {
     // no-op because images loaded via preload
+    return Promise.resolve(p);
 }
 
 function onImageError(ev: Event | HTMLImageElement) {
