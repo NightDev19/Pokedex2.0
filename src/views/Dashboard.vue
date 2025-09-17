@@ -1,266 +1,395 @@
-<!-- src/views/Dashboard.vue -->
+<!-- views/Dashboard.vue -->
 <template>
     <div class="p-6">
+        <!-- Search Bar -->
         <div class="flex items-center gap-4 mb-6">
             <Input
                 v-model="query"
-                placeholder="Search by name or id (press Enter or click Search)"
+                placeholder="Search by name or ID (press Enter or click Search)"
                 @keyup.enter="onSearch"
+                @input="onSearchInput"
                 class="flex-1 max-w-md"
             />
-            <Button @click="onSearch" :disabled="loading">Search</Button>
-            <Button variant="ghost" @click="resetList" :disabled="loading"
-                >Reset</Button
-            >
+            <Button @click="onSearch" :disabled="loading">
+                <Search class="w-4 h-4 mr-2" />
+                Search
+            </Button>
+            <Button variant="ghost" @click="resetList" :disabled="loading">
+                <RotateCcw class="w-4 h-4 mr-2" />
+                Reset
+            </Button>
         </div>
 
-        <div v-if="error" class="mb-4 text-red-600">{{ error }}</div>
-        <div v-if="loading" class="mb-4">Loading…</div>
-
-        <!-- Grid of cards -->
+        <!-- Feedback Messages -->
         <div
-            class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+            v-if="error"
+            class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600"
         >
-            <Card
-                v-for="p in displayList"
-                :key="p.id + '-' + p.name"
-                class="flex flex-col items-center p-4 card"
-            >
-                <div class="w-full flex justify-center">
-                    <img
-                        :src="imageLoaded[p.id] || placeholder"
-                        :data-name="p.name"
-                        :data-id="p.id"
-                        class="w-32 h-32 object-contain select-none pokemon-img"
-                        @load="() => onImageLoad(p)"
-                        @error="onImageError"
-                        loading="lazy"
-                    />
-                </div>
-
-                <div class="w-full text-center mt-3">
-                    <h3 class="font-medium text-lg capitalize">{{ p.name }}</h3>
-                    <p class="text-sm text-muted-foreground">#{{ p.id }}</p>
-                </div>
-
-                <div class="w-full mt-3 flex gap-2">
-                    <Button
-                        class="flex-1"
-                        size="sm"
-                        @click="showDetails(p, $event)"
-                    >
-                        Details
-                    </Button>
-                </div>
-            </Card>
+            {{ error }}
         </div>
-
-        <!-- Modal -->
         <div
-            v-if="selected"
-            class="fixed inset-0 z-50 flex items-center justify-center"
+            v-if="loading && displayList.length === 0"
+            class="mb-4 flex items-center gap-2 text-blue-600"
         >
             <div
-                class="absolute inset-0 bg-black/40"
-                @click="selected = null"
+                class="animate-spin w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full"
             ></div>
-            <div class="bg-white rounded-lg p-6 z-10 max-w-xl w-full">
-                <div class="flex justify-between items-start">
-                    <h2 class="text-xl font-semibold capitalize">
-                        {{ selected.name }}
-                    </h2>
-                    <button class="ml-4" @click="selected = null">✕</button>
-                </div>
-
-                <div class="mt-4 flex gap-6">
-                    <img
-                        :src="
-                            selectedImg ||
-                            imageLoaded[selected.id] ||
-                            placeholder
-                        "
-                        :alt="selected.name"
-                        class="w-32 h-32 object-contain pokemon-img"
-                    />
-                    <div>
-                        <p><strong>ID:</strong> {{ selected.id }}</p>
-                        <p><strong>Height:</strong> {{ selected.height }}</p>
-                        <p><strong>Weight:</strong> {{ selected.weight }}</p>
-                        <p class="mt-2">
-                            <strong>Types:</strong>
-                            <span
-                                v-for="t in selected.types"
-                                :key="t.type.name"
-                                class="capitalize"
-                            >
-                                {{ t.type.name
-                                }}<span v-if="!isLastType(t)">, </span>
-                            </span>
-                        </p>
-                        <p class="mt-2">
-                            <strong>Abilities:</strong>
-                            <span
-                                v-for="a in selected.abilities"
-                                :key="a.ability.name"
-                                class="capitalize"
-                            >
-                                {{ a.ability.name
-                                }}<span v-if="!isLastAbility(a)">, </span>
-                            </span>
-                        </p>
-                    </div>
-                </div>
-
-                <div class="mt-6 text-right">
-                    <Button @click="selected = null">Close</Button>
-                </div>
-            </div>
+            Loading Pokémon...
         </div>
+
+        <!-- Stats -->
+        <div v-if="displayList.length > 0" class="mb-4 text-sm text-gray-600">
+            Showing {{ displayList.length }} of {{ total || "many" }} Pokémon
+        </div>
+
+        <!-- Grid of Cards with Intersection Observer -->
+        <div
+            ref="gridRef"
+            class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
+        >
+            <PokemonCard
+                v-for="pokemon in displayList"
+                :key="`${pokemon.id}-${pokemon.name}`"
+                :pokemon="pokemon"
+                :image-src="getImageSrc(pokemon)"
+                @show-details="showDetails"
+                @image-loaded="onImageLoaded"
+                @image-error="onImageError"
+            />
+        </div>
+
+        <!-- Load More Button -->
+        <div v-if="canLoadMore" class="mt-8 text-center">
+            <Button
+                @click="loadMore"
+                :disabled="loading"
+                variant="outline"
+                size="lg"
+            >
+                <Plus class="w-4 h-4 mr-2" />
+                Load More Pokémon
+            </Button>
+        </div>
+
+        <!-- Loading indicator for more items -->
+        <div v-if="loading && displayList.length > 0" class="mt-4 text-center">
+            <div
+                class="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto"
+            ></div>
+        </div>
+
+        <!-- Basic Details Modal -->
+        <PokemonModal
+            :pokemon="selected"
+            :is-open="!!selected"
+            @close="closeModal"
+            @view-full-details="goToDetails"
+        />
 
         <!-- Floating Scroll-to-Top Button -->
         <Button
+            v-if="showScrollTop"
             @click="scrollToTop"
             variant="outline"
-            class="fixed bottom-6 right-6 rounded-full p-3 shadow-lg flex items-center justify-center hover:bg-gray-200 transition"
+            class="fixed bottom-6 right-6 rounded-full p-3 shadow-lg flex items-center justify-center hover:bg-gray-200 transition z-40"
         >
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-            >
-                <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 15l7-7 7 7"
-                />
-            </svg>
+            <ChevronUp class="h-5 w-5" />
         </Button>
     </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from "vue";
+import {
+    ref,
+    reactive,
+    onMounted,
+    watch,
+    computed,
+    nextTick,
+    onUnmounted,
+} from "vue";
+import { useRouter } from "vue-router";
 import type { PokemonSummary, PokemonDetail } from "@/composables/usePokemon";
 import { usePokemonApi } from "@/composables/usePokemon";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Search, RotateCcw, Plus, ChevronUp } from "lucide-vue-next";
+import PokemonCard from "@/components/PokemonCard.vue";
+import PokemonModal from "@/components/PokemonModal.vue";
 
-const {
-    pokemons,
-    list,
-    get,
-    search,
-    fetchDetailsForSummaries,
-    loading,
-    error,
-} = usePokemonApi();
+const router = useRouter();
 
+// API hooks
+const { pokemons, list, get, search, loading, error, total, page, pageSize } =
+    usePokemonApi();
+
+// Reactive state
 const query = ref("");
 const displayList = ref<PokemonSummary[]>([]);
 const selected = ref<PokemonDetail | null>(null);
-const selectedImg = ref<string | null>(null);
+const imageLoaded = reactive<Record<number, string>>({});
+const showScrollTop = ref(false);
+const gridRef = ref<HTMLElement>();
 
-// Progressive loading
+// Search debouncing
+let searchTimeout: NodeJS.Timeout;
+
+// Pagination state
+const currentPage = ref(1);
+const itemsPerPage = 20;
+const isSearchMode = ref(false);
+
+// Placeholder for unloaded images
 const placeholder =
     "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-const imageLoaded = reactive<Record<number, string>>({});
 
+// Image management with lazy loading
+const loadedImages = new Set<number>();
+const loadingImages = new Set<number>();
+
+// Computed properties
+const canLoadMore = computed(() => {
+    if (isSearchMode.value) return false;
+    return displayList.value.length < (total.value || 1000) && !loading.value;
+});
+
+// Lifecycle
 onMounted(async () => {
-    await list(1, 151);
-    displayList.value = pokemons.value.slice();
-    loadAllImages(displayList.value);
+    await loadInitialData();
+    setupScrollListener();
+    await nextTick();
+    setupIntersectionObserver();
 });
 
-watch(pokemons, () => {
-    if (!query.value) displayList.value = pokemons.value.slice();
-    loadAllImages(displayList.value);
+onUnmounted(() => {
+    removeScrollListener();
 });
 
-function spriteUrl(nameOrNameStr: string | number, id?: number): string {
-    if (
-        typeof nameOrNameStr === "number" ||
-        (/^\d+$/.test(String(nameOrNameStr)) && id)
-    ) {
-        return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
+// Watchers
+watch(pokemons, (newVal) => {
+    if (!isSearchMode.value) {
+        displayList.value = newVal.slice();
     }
-    const normId = id || String(nameOrNameStr);
-    return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${normId}.gif`;
+});
+
+// --- Image Helpers ---
+function getImageSrc(pokemon: PokemonSummary): string {
+    if (imageLoaded[pokemon.id]) {
+        return imageLoaded[pokemon.id];
+    }
+    return placeholder;
 }
 
-// Preload images asynchronously
-function loadAllImages(list: PokemonSummary[]) {
-    list.forEach((p) => {
+function spriteUrl(
+    id: number,
+    type: "animated" | "official" | "normal" = "animated",
+): string {
+    switch (type) {
+        case "animated":
+            return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${id}.gif`;
+        case "official":
+            return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${id}.png`;
+        case "normal":
+            return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png`;
+        default:
+            return placeholder;
+    }
+}
+
+async function loadImage(pokemon: PokemonSummary): Promise<void> {
+    if (loadedImages.has(pokemon.id) || loadingImages.has(pokemon.id)) {
+        return;
+    }
+
+    loadingImages.add(pokemon.id);
+
+    try {
+        // Try animated first
+        const animatedSrc = spriteUrl(pokemon.id, "animated");
         const img = new Image();
-        img.src = spriteUrl(p.name, p.id);
-        img.onload = () => {
-            imageLoaded[p.id] = img.src;
-        };
-        img.onerror = () => onImageError(img as any);
+
+        await new Promise<void>((resolve, reject) => {
+            img.onload = () => {
+                imageLoaded[pokemon.id] = animatedSrc;
+                loadedImages.add(pokemon.id);
+                resolve();
+            };
+            img.onerror = () => reject();
+            img.src = animatedSrc;
+        });
+    } catch {
+        // Fallback to official artwork
+        try {
+            const officialSrc = spriteUrl(pokemon.id, "official");
+            const img = new Image();
+
+            await new Promise<void>((resolve, reject) => {
+                img.onload = () => {
+                    imageLoaded[pokemon.id] = officialSrc;
+                    loadedImages.add(pokemon.id);
+                    resolve();
+                };
+                img.onerror = () => reject();
+                img.src = officialSrc;
+            });
+        } catch {
+            // Final fallback to normal sprite
+            const normalSrc = spriteUrl(pokemon.id, "normal");
+            imageLoaded[pokemon.id] = normalSrc;
+            loadedImages.add(pokemon.id);
+        }
+    } finally {
+        loadingImages.delete(pokemon.id);
+    }
+}
+
+// Batch load images for visible items
+async function loadVisibleImages() {
+    const visiblePokemon = displayList.value.slice(0, 40); // Load first 40 images
+    const promises = visiblePokemon.map(loadImage);
+    await Promise.allSettled(promises);
+}
+
+// --- Intersection Observer for Lazy Loading ---
+let observer: IntersectionObserver | null = null;
+
+function setupIntersectionObserver() {
+    if (!gridRef.value) return;
+
+    observer = new IntersectionObserver(
+        (entries) => {
+            entries.forEach((entry) => {
+                if (entry.isIntersecting) {
+                    const pokemonId =
+                        entry.target.getAttribute("data-pokemon-id");
+                    if (pokemonId) {
+                        const pokemon = displayList.value.find(
+                            (p) => p.id.toString() === pokemonId,
+                        );
+                        if (pokemon) {
+                            loadImage(pokemon);
+                        }
+                    }
+                }
+            });
+        },
+        {
+            rootMargin: "100px",
+            threshold: 0.1,
+        },
+    );
+
+    // Observe all current cards
+    const cards = gridRef.value.querySelectorAll("[data-pokemon-id]");
+    cards.forEach((card) => observer?.observe(card));
+}
+
+// --- Data Loading ---
+async function loadInitialData() {
+    currentPage.value = 1;
+    await list(1, itemsPerPage);
+    displayList.value = pokemons.value.slice();
+    await loadVisibleImages();
+}
+
+async function loadMore() {
+    if (loading.value || isSearchMode.value) return;
+
+    currentPage.value += 1;
+    const offset = (currentPage.value - 1) * itemsPerPage;
+    await list(currentPage.value, itemsPerPage);
+
+    // Append new items
+    const currentIds = new Set(displayList.value.map((p) => p.id));
+    const newItems = pokemons.value.filter((p) => !currentIds.has(p.id));
+    displayList.value.push(...newItems);
+
+    // Setup observer for new items
+    await nextTick();
+    const newCards = gridRef.value?.querySelectorAll("[data-pokemon-id]");
+    newCards?.forEach((card) => {
+        if (!observer) return;
+        observer.observe(card);
     });
 }
 
-function onImageLoad(p: PokemonSummary) {
-    // no-op because images loaded via preload
-    return Promise.resolve(p);
-}
+// --- Search Functions ---
+function onSearchInput() {
+    clearTimeout(searchTimeout);
+    if (!query.value.trim()) {
+        onSearchClear();
+        return;
+    }
 
-function onImageError(ev: Event | HTMLImageElement) {
-    let img: HTMLImageElement;
-    if (ev instanceof Event) img = ev.target as HTMLImageElement;
-    else img = ev;
-    const dataId = img.getAttribute("data-id") || "";
-    if (dataId)
-        img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${dataId}.png`;
-}
-
-function isLastType(t: any) {
-    return selected.value?.types?.[selected.value.types.length - 1] === t;
-}
-function isLastAbility(a: any) {
-    return (
-        selected.value?.abilities?.[selected.value.abilities.length - 1] === a
-    );
+    searchTimeout = setTimeout(() => {
+        onSearch();
+    }, 300); // Debounce search
 }
 
 async function onSearch() {
-    const q = (query.value || "").trim();
+    const q = query.value.trim();
     if (!q) {
-        await list(1, 151);
-        displayList.value = pokemons.value.slice();
-        loadAllImages(displayList.value);
+        await onSearchClear();
         return;
     }
-    const results = await search(q, 151);
+
+    isSearchMode.value = true;
+    const results = await search(q, 100);
     displayList.value = results;
-    loadAllImages(displayList.value);
+    await loadVisibleImages();
 }
 
-function resetList() {
+async function onSearchClear() {
+    isSearchMode.value = false;
+    currentPage.value = 1;
+    await list(1, itemsPerPage);
+    displayList.value = pokemons.value.slice();
+    await loadVisibleImages();
+}
+
+async function resetList() {
     query.value = "";
-    list(1, 151).then(() => {
-        displayList.value = pokemons.value.slice();
-        loadAllImages(displayList.value);
-    });
+    await onSearchClear();
 }
 
-// Show details modal
-async function showDetails(s: PokemonSummary, ev: Event) {
-    const imgEl = (ev.currentTarget as HTMLElement)
-        ?.closest(".card")
-        ?.querySelector("img") as HTMLImageElement | null;
+// --- Event Handlers ---
+function onImageLoaded(pokemon: PokemonSummary) {
+    loadedImages.add(pokemon.id);
+}
 
-    selectedImg.value = imgEl?.src || null;
+function onImageError(pokemon: PokemonSummary) {
+    // Try fallback image
+    const fallbackSrc = spriteUrl(pokemon.id, "normal");
+    imageLoaded[pokemon.id] = fallbackSrc;
+}
 
-    const details = await get(s.id || s.name);
-    if (details) selected.value = details;
-    else {
-        const arr = await fetchDetailsForSummaries([s], 1);
-        selected.value = arr[0] || null;
+async function showDetails(pokemon: PokemonSummary) {
+    const details = await get(pokemon.id || pokemon.name);
+    if (details) {
+        selected.value = details;
     }
+}
+
+function closeModal() {
+    selected.value = null;
+}
+
+function goToDetails(pokemon: PokemonDetail) {
+    router.push(`/pokemon/${pokemon.id}`);
+    closeModal();
+}
+
+// --- Scroll Handling ---
+function setupScrollListener() {
+    window.addEventListener("scroll", onScroll, { passive: true });
+}
+
+function removeScrollListener() {
+    window.removeEventListener("scroll", onScroll);
+}
+
+function onScroll() {
+    showScrollTop.value = window.scrollY > 500;
 }
 
 function scrollToTop() {
@@ -273,37 +402,32 @@ function scrollToTop() {
     color: rgba(100, 116, 139, 1);
 }
 
-@keyframes float-slow {
-    0% {
-        transform: translateY(0);
+/* Loading animation */
+@keyframes pulse {
+    0%,
+    100% {
+        opacity: 1;
     }
     50% {
-        transform: translateY(-6px);
-    }
-    100% {
-        transform: translateY(0);
+        opacity: 0.5;
     }
 }
 
-.pokemon-img {
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Smooth transitions */
+.grid > * {
     transition:
-        transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-        filter 220ms;
-    will-change: transform;
-    animation: float-slow 3.8s ease-in-out infinite;
-    image-rendering: pixelated;
-    image-rendering: crisp-edges;
+        transform 0.2s ease,
+        opacity 0.2s ease;
 }
 
-.pokemon-img:hover {
-    transform: translateY(-6px) scale(1.04);
-    filter: drop-shadow(0 8px 18px rgba(15, 23, 42, 0.08));
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .pokemon-img {
-        animation: none !important;
-        transition: none !important;
+/* Responsive grid improvements */
+@media (min-width: 1536px) {
+    .grid {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
     }
 }
 </style>

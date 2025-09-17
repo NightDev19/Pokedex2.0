@@ -1,12 +1,4 @@
-// usePokemon.ts
-// Vue 3 composable (TypeScript) for interacting with the PokeAPI.
-// Exposes: list, search, get (single), pokemons, pokemon, loading, error, page, pageSize, total, clearCache
-//
-// Notes (be skeptical): PokeAPI does not provide a substring search endpoint. `search` will first try an exact-name lookup
-// (cheap). If that fails it will fetch the list of all pokemon names (one request) and filter locally — this is the
-// practical tradeoff but can be heavy if you repeatedly do broad searches. Consider server-side indexing or a cached
-// name-list if you need frequent substring search in production.
-
+// composables/usePokemon.ts
 import { ref, computed } from "vue";
 
 const API_BASE = "https://pokeapi.co/api/v2";
@@ -24,10 +16,6 @@ export interface PokemonListResponse {
   results: PokemonSummary[];
 }
 
-/**
- * A pragmatic, fairly-complete typing for the parts of a Pokemon detail most apps need.
- * Extend as necessary.
- */
 export interface PokemonDetail {
   id: number;
   name: string;
@@ -36,6 +24,26 @@ export interface PokemonDetail {
   base_experience?: number;
   sprites: {
     front_default?: string | null;
+    front_shiny?: string | null;
+    other?: {
+      "official-artwork"?: {
+        front_default?: string;
+        front_shiny?: string;
+      };
+      dream_world?: {
+        front_default?: string;
+      };
+    };
+    versions?: {
+      "generation-v"?: {
+        "black-white"?: {
+          animated?: {
+            front_default?: string;
+            front_shiny?: string;
+          };
+        };
+      };
+    };
     [key: string]: any;
   };
   types: Array<{ slot: number; type: { name: string; url: string } }>;
@@ -53,26 +61,117 @@ export interface PokemonDetail {
     move: { name: string; url: string };
     version_group_details?: any[];
   }>;
-  // add more fields if you need them
+  species: {
+    name: string;
+    url: string;
+  };
+}
+
+export interface PokemonSpecies {
+  id: number;
+  name: string;
+  evolution_chain: {
+    url: string;
+  };
+  flavor_text_entries: Array<{
+    flavor_text: string;
+    language: { name: string; url: string };
+    version: { name: string; url: string };
+  }>;
+  genera: Array<{
+    genus: string;
+    language: { name: string; url: string };
+  }>;
+}
+
+export interface EvolutionChain {
+  id: number;
+  chain: EvolutionNode;
+}
+
+export interface EvolutionNode {
+  is_baby: boolean;
+  species: { name: string; url: string };
+  evolution_details: Array<{
+    min_level?: number;
+    trigger: { name: string; url: string };
+    item?: { name: string; url: string };
+    time_of_day?: string;
+    [key: string]: any;
+  }>;
+  evolves_to: EvolutionNode[];
+}
+
+export interface LocationArea {
+  location_area: {
+    name: string;
+    url: string;
+  };
+  version_details: Array<{
+    max_chance: number;
+    encounter_details: Array<{
+      min_level: number;
+      max_level: number;
+      condition_values: any[];
+      chance: number;
+      method: { name: string; url: string };
+    }>;
+    version: { name: string; url: string };
+  }>;
 }
 
 function extractIdFromUrl(url: string): number {
-  // urls look like https://pokeapi.co/api/v2/pokemon/1/
-  const m = url.match(/\/pokemon\/(\d+)\/?$/);
+  const m = url.match(
+    /\/(?:pokemon|pokemon-species|evolution-chain)\/(\d+)\/?$/,
+  );
   return m ? Number(m[1]) : NaN;
 }
 
-/**
- * usePokemonApi
- *
- * - list(page?, pageSize?) -> returns paginated list (pokemon name + url + id)
- * - get(idOrName) -> fetches full PokemonDetail
- * - search(query) -> tries exact lookup first, otherwise fetches all names and filters locally
- *
- * Returned reactive values: pokemons, pokemon, loading, error, total, page, pageSize
- */
+// Global cache to prevent duplicate requests
+const globalCache = {
+  pokemon: new Map<string | number, PokemonDetail>(),
+  species: new Map<string | number, PokemonSpecies>(),
+  evolution: new Map<string | number, EvolutionChain>(),
+  locations: new Map<string | number, LocationArea[]>(),
+  allPokemon: null as PokemonSummary[] | null,
+};
+
+// Request queue to prevent duplicate concurrent requests
+const requestQueue = new Map<string, Promise<any>>();
+
+async function cachedRequest<T>(
+  key: string,
+  cache: Map<string | number, T>,
+  fetcher: () => Promise<T>,
+): Promise<T> {
+  // Check cache first
+  if (cache.has(key)) {
+    return cache.get(key)!;
+  }
+
+  // Check if request is already in progress
+  const cacheKey = `${cache.constructor.name}-${key}`;
+  if (requestQueue.has(cacheKey)) {
+    return requestQueue.get(cacheKey) as Promise<T>;
+  }
+
+  // Make request and cache promise to prevent duplicates
+  const promise = fetcher()
+    .then((result) => {
+      cache.set(key, result);
+      requestQueue.delete(cacheKey);
+      return result;
+    })
+    .catch((error) => {
+      requestQueue.delete(cacheKey);
+      throw error;
+    });
+
+  requestQueue.set(cacheKey, promise);
+  return promise;
+}
+
 export function usePokemonApi() {
-  // reactive state
   const pokemons = ref<PokemonSummary[]>([]);
   const pokemon = ref<PokemonDetail | null>(null);
   const loading = ref(false);
@@ -82,13 +181,8 @@ export function usePokemonApi() {
   const pageSize = ref<number>(20);
   const total = ref<number>(0);
 
-  // internal cache for details to avoid repeated network calls
-  const detailCache = new Map<number | string, PokemonDetail>();
-
   /**
-   * list - paginated list of pokemon (does NOT include full details)
-   * @param p page number (1-based)
-   * @param ps page size (limit)
+   * Optimized list function with better error handling
    */
   async function list(
     p = page.value,
@@ -97,41 +191,47 @@ export function usePokemonApi() {
     loading.value = true;
     error.value = null;
 
-    const offset = (p - 1) * ps;
     try {
-      const res = await fetch(
-        `${API_BASE}/pokemon?limit=${ps}&offset=${offset}`,
-      );
-      if (!res.ok)
-        throw new Error(`PokeAPI list failed: ${res.status} ${res.statusText}`);
+      const offset = (p - 1) * ps;
+      const cacheKey = `list-${offset}-${ps}`;
 
-      const raw = await res.json();
-      // raw.results is array of { name, url }
-      const results: PokemonSummary[] = raw.results.map(
-        (r: { name: string; url: string }) => {
-          const id = extractIdFromUrl(r.url);
-          return {
-            name: r.name,
-            url: r.url,
-            id: Number.isFinite(id) ? id : -1,
-          };
+      const result = await cachedRequest(
+        cacheKey,
+        new Map(), // Use temporary cache for list requests
+        async () => {
+          const res = await fetch(
+            `${API_BASE}/pokemon?limit=${ps}&offset=${offset}`,
+          );
+          if (!res.ok) {
+            throw new Error(
+              `Failed to fetch Pokemon list: ${res.status} ${res.statusText}`,
+            );
+          }
+          return res.json();
         },
       );
 
+      const results: PokemonSummary[] = result.results.map(
+        (r: { name: string; url: string }) => ({
+          name: r.name,
+          url: r.url,
+          id: extractIdFromUrl(r.url),
+        }),
+      );
+
       pokemons.value = results;
-      total.value = raw.count ?? results.length;
+      total.value = result.count ?? results.length;
       page.value = p;
       pageSize.value = ps;
 
       return {
         count: total.value,
-        next: raw.next ?? null,
-        previous: raw.previous ?? null,
+        next: result.next ?? null,
+        previous: result.previous ?? null,
         results,
       };
     } catch (err: any) {
       error.value = err?.message ?? String(err);
-      // keep previous pokemons if any — caller can decide to clear
       return {
         count: total.value,
         next: null,
@@ -144,53 +244,115 @@ export function usePokemonApi() {
   }
 
   /**
-   * get - fetch full PokemonDetail by id or name
-   * Uses cache if available.
+   * Get Pokemon details with caching
    */
   async function get(idOrName: string | number): Promise<PokemonDetail | null> {
     const key = String(idOrName).toLowerCase();
-    if (detailCache.has(key)) {
-      pokemon.value = detailCache.get(key)!;
-      return pokemon.value;
-    }
-
-    loading.value = true;
-    error.value = null;
 
     try {
-      const res = await fetch(
-        `${API_BASE}/pokemon/${encodeURIComponent(String(idOrName).toLowerCase())}`,
-      );
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error(`Pokemon "${idOrName}" not found.`);
+      const result = await cachedRequest(key, globalCache.pokemon, async () => {
+        const res = await fetch(
+          `${API_BASE}/pokemon/${encodeURIComponent(key)}`,
+        );
+        if (!res.ok) {
+          if (res.status === 404) {
+            throw new Error(`Pokemon "${idOrName}" not found.`);
+          }
+          throw new Error(
+            `Failed to fetch Pokemon: ${res.status} ${res.statusText}`,
+          );
         }
-        throw new Error(`PokeAPI get failed: ${res.status} ${res.statusText}`);
-      }
-      const data: PokemonDetail = await res.json();
-      // cache under numeric id and name
-      detailCache.set(data.id, data);
-      detailCache.set(data.name.toLowerCase(), data);
-      pokemon.value = data;
-      return data;
+        return res.json();
+      });
+
+      pokemon.value = result;
+      return result;
     } catch (err: any) {
       error.value = err?.message ?? String(err);
       pokemon.value = null;
       return null;
-    } finally {
-      loading.value = false;
     }
   }
 
   /**
-   * search - first tries an exact lookup (cheap). If not found, falls back to fetching the
-   * entire pokemon-name index once and performing a case-insensitive substring filter.
-   *
-   * Warning: fallback requires fetching ALL pokemon names (one request with limit=count).
-   * This is still preferable to many small requests, but it can be heavy on first use.
-   *
-   * @param query substring to search for
-   * @param maxResults maximum number of results to return (default 50)
+   * Get Pokemon species data
+   */
+  async function getSpecies(
+    idOrName: string | number,
+  ): Promise<PokemonSpecies | null> {
+    const key = String(idOrName).toLowerCase();
+
+    try {
+      return await cachedRequest(key, globalCache.species, async () => {
+        const res = await fetch(
+          `${API_BASE}/pokemon-species/${encodeURIComponent(key)}`,
+        );
+        if (!res.ok) {
+          throw new Error(
+            `Failed to fetch Pokemon species: ${res.status} ${res.statusText}`,
+          );
+        }
+        return res.json();
+      });
+    } catch (err: any) {
+      error.value = err?.message ?? String(err);
+      return null;
+    }
+  }
+
+  /**
+   * Get evolution chain
+   */
+  async function getEvolutionChain(
+    chainId: number,
+  ): Promise<EvolutionChain | null> {
+    try {
+      return await cachedRequest(chainId, globalCache.evolution, async () => {
+        const res = await fetch(`${API_BASE}/evolution-chain/${chainId}`);
+        if (!res.ok) {
+          throw new Error(
+            `Failed to fetch evolution chain: ${res.status} ${res.statusText}`,
+          );
+        }
+        return res.json();
+      });
+    } catch (err: any) {
+      error.value = err?.message ?? String(err);
+      return null;
+    }
+  }
+
+  /**
+   * Get Pokemon locations
+   */
+  async function getLocations(
+    idOrName: string | number,
+  ): Promise<LocationArea[]> {
+    const key = String(idOrName).toLowerCase();
+
+    try {
+      return await cachedRequest(key, globalCache.locations, async () => {
+        const res = await fetch(
+          `${API_BASE}/pokemon/${encodeURIComponent(key)}/encounters`,
+        );
+        if (!res.ok) {
+          if (res.status === 404) {
+            return []; // No location data available
+          }
+          throw new Error(
+            `Failed to fetch Pokemon locations: ${res.status} ${res.statusText}`,
+          );
+        }
+        return res.json();
+      });
+    } catch (err: any) {
+      error.value = err?.message ?? String(err);
+      return [];
+    }
+  }
+
+  /**
+   * Optimized search with debouncing capability
    */
   async function search(
     query: string,
@@ -202,9 +364,8 @@ export function usePokemonApi() {
     loading.value = true;
     error.value = null;
 
-    // 1) try exact name or numeric id fetch
     try {
-      // If query is purely numeric, try numeric fetch first
+      // Try exact match first
       if (/^\d+$/.test(query)) {
         const byId = await get(Number(query));
         if (byId) {
@@ -216,7 +377,6 @@ export function usePokemonApi() {
             },
           ];
         }
-        // fallthrough to name-based search
       } else {
         const byName = await get(query);
         if (byName) {
@@ -229,45 +389,37 @@ export function usePokemonApi() {
           ];
         }
       }
-    } catch (err) {
-      // swallow — we'll do fallback search
-    } finally {
-      // note: get() toggles loading; we want to remain in loading while fallback may run,
-      // so ensure loading remains true below.
-      loading.value = true;
-      error.value = null;
+    } catch {
+      // Continue to fallback search
     }
 
-    // 2) fallback: fetch *all* names and filter locally (one request)
     try {
-      // get count first
-      const head = await fetch(`${API_BASE}/pokemon?limit=1`);
-      if (!head.ok) throw new Error(`PokeAPI head failed: ${head.statusText}`);
-      const headJson = await head.json();
-      const count = headJson.count ?? 0;
+      // Use cached all Pokemon list
+      if (!globalCache.allPokemon) {
+        const head = await fetch(`${API_BASE}/pokemon?limit=1`);
+        if (!head.ok) throw new Error(`Failed to fetch Pokemon count`);
+        const headJson = await head.json();
+        const count = headJson.count ?? 0;
 
-      // fetch entire list
-      const listRes = await fetch(
-        `${API_BASE}/pokemon?limit=${count}&offset=0`,
-      );
-      if (!listRes.ok)
-        throw new Error(`PokeAPI full list failed: ${listRes.statusText}`);
-      const listJson = await listRes.json();
-      const all: PokemonSummary[] = listJson.results.map(
-        (r: { name: string; url: string }) => {
-          const id = extractIdFromUrl(r.url);
-          return {
+        const listRes = await fetch(
+          `${API_BASE}/pokemon?limit=${count}&offset=0`,
+        );
+        if (!listRes.ok) throw new Error(`Failed to fetch all Pokemon`);
+        const listJson = await listRes.json();
+
+        globalCache.allPokemon = listJson.results.map(
+          (r: { name: string; url: string }) => ({
             name: r.name,
             url: r.url,
-            id: Number.isFinite(id) ? id : -1,
-          };
-        },
-      );
+            id: extractIdFromUrl(r.url),
+          }),
+        );
+      }
 
-      const filtered = all
+      const filtered = globalCache.allPokemon
         .filter((p) => p.name.toLowerCase().includes(query))
         .slice(0, maxResults);
-      // optionally set pokemons.value to the filtered subset so UI can bind to it
+
       pokemons.value = filtered;
       total.value = filtered.length;
       return filtered;
@@ -280,57 +432,103 @@ export function usePokemonApi() {
   }
 
   /**
-   * fetchAllDetails - utility to fetch details for a list of summaries (with concurrency limit).
-   * Useful if you need full details for the visible page.
+   * Get complete Pokemon data (details + species + evolution + locations)
+   */
+  async function getCompletePokemonData(idOrName: string | number) {
+    loading.value = true;
+    error.value = null;
+
+    try {
+      const [pokemonData, speciesData] = await Promise.all([
+        get(idOrName),
+        getSpecies(idOrName),
+      ]);
+
+      if (!pokemonData || !speciesData) {
+        throw new Error("Failed to fetch Pokemon data");
+      }
+
+      const evolutionChainId = extractIdFromUrl(
+        speciesData.evolution_chain.url,
+      );
+      const [evolutionData, locationData] = await Promise.all([
+        getEvolutionChain(evolutionChainId),
+        getLocations(idOrName),
+      ]);
+
+      return {
+        pokemon: pokemonData,
+        species: speciesData,
+        evolution: evolutionData,
+        locations: locationData,
+      };
+    } catch (err: any) {
+      error.value = err?.message ?? String(err);
+      return null;
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  /**
+   * Batch fetch with concurrency control
    */
   async function fetchDetailsForSummaries(
     summaries: PokemonSummary[],
     concurrency = 6,
   ): Promise<PokemonDetail[]> {
-    // naive concurrency limiter
     const results: PokemonDetail[] = [];
-    const queue = [...summaries];
+    const semaphore = new Array(concurrency).fill(null);
 
-    async function worker() {
-      while (queue.length) {
-        const s = queue.shift();
-        if (!s) break;
-        const cached =
-          detailCache.get(s.id) || detailCache.get(s.name.toLowerCase());
-        if (cached) {
-          results.push(cached);
-          continue;
+    const fetchWorker = async (summary: PokemonSummary) => {
+      const cached =
+        globalCache.pokemon.get(summary.id) ||
+        globalCache.pokemon.get(summary.name.toLowerCase());
+      if (cached) {
+        results.push(cached);
+        return;
+      }
+
+      try {
+        const detail = await get(summary.id);
+        if (detail) {
+          results.push(detail);
         }
-        try {
-          const res = await fetch(`${API_BASE}/pokemon/${s.id}`);
-          if (!res.ok) continue;
-          const data: PokemonDetail = await res.json();
-          detailCache.set(data.id, data);
-          detailCache.set(data.name.toLowerCase(), data);
-          results.push(data);
-        } catch {
-          // ignore single failures
+      } catch {
+        // Ignore individual failures
+      }
+    };
+
+    const queue = [...summaries];
+    const workers = semaphore.map(async () => {
+      while (queue.length > 0) {
+        const summary = queue.shift();
+        if (summary) {
+          await fetchWorker(summary);
         }
       }
-    }
+    });
 
-    const workers = Array.from({ length: Math.max(1, concurrency) }, () =>
-      worker(),
-    );
     await Promise.all(workers);
     return results;
   }
 
   function clearCache() {
-    detailCache.clear();
+    Object.values(globalCache).forEach((cache) => {
+      if (cache instanceof Map) {
+        cache.clear();
+      }
+    });
+    globalCache.allPokemon = null;
+    requestQueue.clear();
   }
 
-  // convenience computed: whether there's at least one pokemon loaded in list
+  // Computed properties
   const hasList = computed(() => pokemons.value.length > 0);
   const hasPokemon = computed(() => pokemon.value !== null);
 
   return {
-    // state
+    // State
     pokemons,
     pokemon,
     loading,
@@ -340,10 +538,15 @@ export function usePokemonApi() {
     total,
     hasList,
     hasPokemon,
-    // actions
+
+    // Actions
     list,
     get,
     search,
+    getSpecies,
+    getEvolutionChain,
+    getLocations,
+    getCompletePokemonData,
     fetchDetailsForSummaries,
     clearCache,
   };
