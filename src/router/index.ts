@@ -1,4 +1,3 @@
-// router/index.ts
 import { createRouter, createWebHistory } from "vue-router";
 import Dashboard from "@/views/Dashboard.vue";
 import PokemonDetails from "@/views/PokemonDetails.vue";
@@ -26,13 +25,13 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
-  scrollBehavior(to, from, savedPosition) {
+  scrollBehavior(_, __, savedPosition) {
     return savedPosition || { top: 0 };
   },
 });
 
 // Global navigation guard for setting page titles
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _, next) => {
   document.title = (to.meta.title as string) || "Pokémon App";
   next();
 });

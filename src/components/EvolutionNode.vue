@@ -122,9 +122,8 @@ interface Props {
 interface Emits {
     (e: "pokemon-click", pokemonName: string): void;
 }
-
+defineEmits<Emits>();
 const props = defineProps<Props>();
-const emit = defineEmits<Emits>();
 
 const imageError = ref(false);
 

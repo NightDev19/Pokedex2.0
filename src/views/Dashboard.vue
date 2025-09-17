@@ -120,8 +120,17 @@ import PokemonModal from "@/components/PokemonModal.vue";
 const router = useRouter();
 
 // API hooks
-const { pokemons, list, get, search, loading, error, total, page, pageSize } =
-    usePokemonApi();
+const {
+    pokemons,
+    list,
+    get,
+    search,
+    loading,
+    error,
+    total,
+    page: _page,
+    pageSize: _pageSize,
+} = usePokemonApi();
 
 // Reactive state
 const query = ref("");
@@ -296,21 +305,15 @@ async function loadMore() {
     if (loading.value || isSearchMode.value) return;
 
     currentPage.value += 1;
-    const offset = (currentPage.value - 1) * itemsPerPage;
     await list(currentPage.value, itemsPerPage);
 
-    // Append new items
     const currentIds = new Set(displayList.value.map((p) => p.id));
     const newItems = pokemons.value.filter((p) => !currentIds.has(p.id));
     displayList.value.push(...newItems);
 
-    // Setup observer for new items
     await nextTick();
     const newCards = gridRef.value?.querySelectorAll("[data-pokemon-id]");
-    newCards?.forEach((card) => {
-        if (!observer) return;
-        observer.observe(card);
-    });
+    newCards?.forEach((card) => observer?.observe(card));
 }
 
 // --- Search Functions ---

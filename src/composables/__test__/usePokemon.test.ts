@@ -136,27 +136,30 @@ describe("usePokemonApi composable", () => {
       moves: [],
     };
 
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    const { get, clearCache } = usePokemonApi();
+
+    // First call - setup mock
+    const mockFetch = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => mockPokemon,
     });
+    global.fetch = mockFetch as unknown as typeof fetch;
 
-    const { get, clearCache } = usePokemonApi();
     const first = await get(1);
     expect(first).toEqual(mockPokemon);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     clearCache();
 
-    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    // Second call - setup fresh mock
+    const mockFetch2 = vi.fn().mockResolvedValueOnce({
       ok: true,
       json: async () => mockPokemon,
     });
+    global.fetch = mockFetch2 as unknown as typeof fetch;
 
     const second = await get(1);
     expect(second).toEqual(mockPokemon);
-
-    expect(
-      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
-    ).toBe(2);
+    expect(mockFetch2).toHaveBeenCalledTimes(1);
   });
 });
