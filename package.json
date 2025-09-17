@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "vitest",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview",
-    "test": "vitest"
+    "test-and-build": "npm run test && npm run build",
+    "test-and-build-parallel": "npm-run-all -p test build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.13",

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { usePokemonApi } from "../usePokemon";
 
 // mock global fetch
-global.fetch = vi.fn();
+global.fetch = vi.fn() as unknown as typeof fetch;
 
 describe("usePokemonApi composable", () => {
   beforeEach(() => {
@@ -11,7 +11,7 @@ describe("usePokemonApi composable", () => {
   });
 
   it("lists pokemons (paginated)", async () => {
-    (fetch as unknown as vi.Mock).mockResolvedValueOnce({
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         count: 2,
@@ -45,7 +45,7 @@ describe("usePokemonApi composable", () => {
       moves: [],
     };
 
-    (fetch as unknown as vi.Mock).mockResolvedValueOnce({
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => mockPokemon,
     });
@@ -70,7 +70,7 @@ describe("usePokemonApi composable", () => {
       moves: [],
     };
 
-    (fetch as unknown as vi.Mock).mockResolvedValueOnce({
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => mockPokemon,
     });
@@ -83,19 +83,13 @@ describe("usePokemonApi composable", () => {
   });
 
   it("handles search fallback with substring", async () => {
-    // 1) get(query) fails
-    // 2) head fetch
-    // 3) full list fetch
-    (fetch as unknown as vi.Mock)
+    (fetch as unknown as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         ok: false,
         status: 404,
         statusText: "Not Found",
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ count: 2 }),
-      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ count: 2 }) })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -114,25 +108,14 @@ describe("usePokemonApi composable", () => {
   });
 
   it("returns empty on search if no match", async () => {
-    // 1) get(query) fails
-    // 2) head fetch
-    // 3) full list fetch returns empty
-    (fetch as unknown as vi.Mock)
+    (fetch as unknown as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce({
         ok: false,
         status: 404,
         statusText: "Not Found",
       })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ count: 0 }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          results: [],
-        }),
-      });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ count: 0 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ results: [] }) });
 
     const { search } = usePokemonApi();
     const results = await search("notapokemon");
@@ -153,31 +136,27 @@ describe("usePokemonApi composable", () => {
       moves: [],
     };
 
-    // 1st fetch for get()
-    (fetch as unknown as vi.Mock).mockResolvedValueOnce({
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => mockPokemon,
     });
 
     const { get, clearCache } = usePokemonApi();
     const first = await get(1);
-
     expect(first).toEqual(mockPokemon);
 
-    // clear the cache
     clearCache();
 
-    // 2nd fetch after clearing, must call fetch again
-    (fetch as unknown as vi.Mock).mockResolvedValueOnce({
+    (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => mockPokemon,
     });
 
     const second = await get(1);
-
     expect(second).toEqual(mockPokemon);
 
-    // fetch should have been called twice (once before and once after clearCache)
-    expect((fetch as unknown as vi.Mock).mock.calls.length).toBe(2);
+    expect(
+      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length,
+    ).toBe(2);
   });
 });
