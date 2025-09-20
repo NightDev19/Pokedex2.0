@@ -1,4 +1,3 @@
-<!-- views/PokemonDetails.vue -->
 <template>
     <div
         class="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50"
@@ -39,22 +38,45 @@
         >
             <!-- Header -->
             <div class="mb-4 sm:mb-6">
-                <Button @click="goBack" variant="outline" class="mb-4">
-                    <ArrowLeft class="w-4 h-4 mr-2" />
-                    Back to List
-                </Button>
+                <div class="flex items-center justify-between gap-4 mb-4">
+                    <div class="flex items-center gap-3">
+                        <Button @click="goBack" variant="outline" class="mb-0">
+                            <ArrowLeft class="w-4 h-4 mr-2" />
+                            Back to List
+                        </Button>
+
+                        <!-- Debug toggle for easier debugging -->
+                        <Button
+                            @click="toggleDebug"
+                            variant="ghost"
+                            class="mb-0"
+                        >
+                            <Sparkles class="w-4 h-4 mr-2" />
+                            <span class="text-sm">{{
+                                debug ? "Hide Debug" : "Show Debug"
+                            }}</span>
+                        </Button>
+                    </div>
+
+                    <!-- quick info: formatted id and name for easier copy/paste -->
+                    <div class="text-right text-sm text-gray-500">
+                        <div class="font-medium">{{ pokemonName }}</div>
+                        <div>{{ formattedId }}</div>
+                    </div>
+                </div>
 
                 <div
                     class="flex flex-col sm:flex-row items-center gap-4 sm:gap-6 bg-white rounded-xl p-4 sm:p-6 shadow-lg"
                 >
                     <div class="relative shrink-0">
                         <img
-                            :src="getMainImage(pokemonData.pokemon)"
-                            :alt="pokemonData.pokemon.name"
+                            :src="mainImage"
+                            :alt="pokemonName"
                             class="w-28 h-28 sm:w-32 sm:h-32 md:w-40 md:h-40 object-contain"
                         />
+
                         <Button
-                            v-if="hasShiny(pokemonData.pokemon)"
+                            v-if="shinyAvailable"
                             @click="toggleShiny"
                             :variant="showShiny ? 'default' : 'outline'"
                             size="sm"
@@ -75,10 +97,10 @@
                             <h1
                                 class="text-2xl sm:text-3xl md:text-4xl font-bold capitalize"
                             >
-                                {{ pokemonData.pokemon.name }}
+                                {{ pokemonName }}
                             </h1>
                             <span class="text-xl sm:text-2xl text-gray-500">{{
-                                formatPokemonId(pokemonData.pokemon.id)
+                                formattedId
                             }}</span>
                         </div>
 
@@ -86,12 +108,12 @@
                             class="flex flex-wrap justify-center sm:justify-start gap-2 mb-4"
                         >
                             <span
-                                v-for="type in pokemonData.pokemon.types"
-                                :key="type.type.name"
-                                :class="getTypeColor(type.type.name)"
+                                v-for="type in types"
+                                :key="type"
+                                :class="getTypeColor(type)"
                                 class="px-3 py-1 sm:px-4 sm:py-2 rounded-full text-white font-medium capitalize shadow-md text-sm"
                             >
-                                {{ type.type.name }}
+                                {{ type }}
                             </span>
                         </div>
 
@@ -101,40 +123,40 @@
                             <div class="text-center">
                                 <p class="text-gray-600">Height</p>
                                 <p class="text-sm sm:text-lg font-semibold">
-                                    {{
-                                        (
-                                            pokemonData.pokemon.height / 10
-                                        ).toFixed(1)
-                                    }}m
+                                    {{ heightMeters }}m
                                 </p>
                             </div>
                             <div class="text-center">
                                 <p class="text-gray-600">Weight</p>
                                 <p class="text-sm sm:text-lg font-semibold">
-                                    {{
-                                        (
-                                            pokemonData.pokemon.weight / 10
-                                        ).toFixed(1)
-                                    }}kg
+                                    {{ weightKg }}kg
                                 </p>
                             </div>
                             <div class="text-center">
                                 <p class="text-gray-600">Base Exp</p>
                                 <p class="text-sm sm:text-lg font-semibold">
-                                    {{
-                                        pokemonData.pokemon.base_experience ||
-                                        "N/A"
-                                    }}
+                                    {{ baseExp }}
                                 </p>
                             </div>
                             <div class="text-center">
                                 <p class="text-gray-600">Category</p>
                                 <p class="text-sm sm:text-lg font-semibold">
-                                    {{ getPokemonGenus() }}
+                                    {{ genus }}
                                 </p>
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- Debug panel (collapsible) -->
+                <div
+                    v-if="debug"
+                    class="mt-4 p-4 bg-gray-50 rounded-lg border overflow-x-auto text-xs"
+                >
+                    <div class="font-medium mb-2">Debug: Raw pokemonData</div>
+                    <pre class="whitespace-pre-wrap">{{
+                        safePrettyJson(pokemonData)
+                    }}</pre>
                 </div>
             </div>
 
@@ -146,11 +168,7 @@
                             v-for="tab in tabs"
                             :key="tab.id"
                             @click="activeTab = tab.id"
-                            :class="
-                                activeTab === tab.id
-                                    ? 'border-blue-500 text-blue-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                            "
+                            :class="tabButtonClass(tab.id)"
                             class="py-3 sm:py-4 px-3 sm:px-4 border-b-2 font-medium text-xs sm:text-sm transition-colors flex items-center gap-1 sm:gap-2 whitespace-nowrap"
                         >
                             <component
@@ -164,7 +182,7 @@
 
                 <div class="p-4 sm:p-6">
                     <!-- Stats Tab -->
-                    <div v-if="activeTab === 'stats'" class="space-y-6">
+                    <section v-if="activeTab === 'stats'" class="space-y-6">
                         <div>
                             <h3
                                 class="text-lg sm:text-xl font-semibold mb-4 flex items-center gap-2"
@@ -174,9 +192,10 @@
                                 />
                                 Base Stats
                             </h3>
+
                             <div class="space-y-3 sm:space-y-4">
                                 <div
-                                    v-for="stat in pokemonData.pokemon.stats"
+                                    v-for="stat in stats"
                                     :key="stat.stat.name"
                                     class="space-y-2"
                                 >
@@ -185,9 +204,10 @@
                                     >
                                         <span
                                             class="text-xs sm:text-sm font-medium capitalize"
+                                            >{{
+                                                getStatName(stat.stat.name)
+                                            }}</span
                                         >
-                                            {{ getStatName(stat.stat.name) }}
-                                        </span>
                                         <span
                                             class="text-xs sm:text-sm font-semibold"
                                             >{{ stat.base_stat }}</span
@@ -198,7 +218,9 @@
                                     >
                                         <div
                                             :style="{
-                                                width: `${Math.min((stat.base_stat / 200) * 100, 100)}%`,
+                                                width: statBarWidth(
+                                                    stat.base_stat,
+                                                ),
                                             }"
                                             :class="
                                                 getStatColor(stat.base_stat)
@@ -220,15 +242,15 @@
                                     >
                                     <span
                                         class="text-lg sm:text-xl font-bold"
-                                        >{{ getTotalStats() }}</span
+                                        >{{ totalStats }}</span
                                     >
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
 
                     <!-- Evolution Tab -->
-                    <div v-if="activeTab === 'evolution'" class="space-y-6">
+                    <section v-if="activeTab === 'evolution'" class="space-y-6">
                         <div v-if="pokemonData.evolution">
                             <h3
                                 class="text-lg sm:text-xl font-semibold mb-6 flex items-center gap-2"
@@ -248,10 +270,10 @@
                                 No evolution data available
                             </p>
                         </div>
-                    </div>
+                    </section>
 
                     <!-- Moves Tab -->
-                    <div v-if="activeTab === 'moves'" class="space-y-6">
+                    <section v-if="activeTab === 'moves'" class="space-y-6">
                         <div>
                             <h3
                                 class="text-lg sm:text-xl font-semibold mb-4 flex items-center gap-2"
@@ -259,7 +281,7 @@
                                 <Swords
                                     class="w-4 h-4 sm:w-5 sm:h-5 text-purple-500"
                                 />
-                                Moves ({{ pokemonData.pokemon.moves.length }})
+                                Moves ({{ moves.length }})
                             </h3>
 
                             <!-- Search moves -->
@@ -281,16 +303,17 @@
                                 >
                                     <span
                                         class="font-medium capitalize text-xs sm:text-sm"
+                                        >{{
+                                            move.move.name.replace("-", " ")
+                                        }}</span
                                     >
-                                        {{ move.move.name.replace("-", " ") }}
-                                    </span>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
 
                     <!-- Locations Tab -->
-                    <div v-if="activeTab === 'locations'" class="space-y-6">
+                    <section v-if="activeTab === 'locations'" class="space-y-6">
                         <div>
                             <h3
                                 class="text-lg sm:text-xl font-semibold mb-4 flex items-center gap-2"
@@ -302,14 +325,11 @@
                             </h3>
 
                             <div
-                                v-if="
-                                    pokemonData.locations &&
-                                    pokemonData.locations.length > 0
-                                "
+                                v-if="locations && locations.length > 0"
                                 class="space-y-3"
                             >
                                 <div
-                                    v-for="location in pokemonData.locations"
+                                    v-for="location in locations"
                                     :key="location.location_area.name"
                                     class="p-3 sm:p-4 border border-gray-200 rounded-lg"
                                 >
@@ -339,8 +359,7 @@
                                                 v-for="encounter in version.encounter_details"
                                                 :key="encounter.method.name"
                                                 class="ml-2 block sm:inline"
-                                            >
-                                                {{
+                                                >{{
                                                     encounter.method.name.replace(
                                                         "-",
                                                         " ",
@@ -349,12 +368,14 @@
                                                 (Lv.
                                                 {{ encounter.min_level }}-{{
                                                     encounter.max_level
-                                                }}, {{ encounter.chance }}%)
-                                            </span>
+                                                }},
+                                                {{ encounter.chance }}%)</span
+                                            >
                                         </div>
                                     </div>
                                 </div>
                             </div>
+
                             <div v-else class="text-center py-8">
                                 <MapPin
                                     class="w-12 h-12 sm:w-16 sm:h-16 text-gray-300 mx-auto mb-4"
@@ -364,10 +385,10 @@
                                 </p>
                             </div>
                         </div>
-                    </div>
+                    </section>
 
                     <!-- Abilities Tab -->
-                    <div v-if="activeTab === 'abilities'" class="space-y-6">
+                    <section v-if="activeTab === 'abilities'" class="space-y-6">
                         <div>
                             <h3
                                 class="text-lg sm:text-xl font-semibold mb-4 flex items-center gap-2"
@@ -381,8 +402,7 @@
                                 class="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4"
                             >
                                 <div
-                                    v-for="ability in pokemonData.pokemon
-                                        .abilities"
+                                    v-for="ability in abilities"
                                     :key="ability.ability.name"
                                     :class="
                                         ability.is_hidden
@@ -394,20 +414,17 @@
                                     <h4
                                         class="font-semibold capitalize mb-2 flex flex-col sm:flex-row sm:items-center gap-2"
                                     >
-                                        <span class="text-sm sm:text-base">
-                                            {{
-                                                ability.ability.name.replace(
-                                                    "-",
-                                                    " ",
-                                                )
-                                            }}
-                                        </span>
+                                        <span class="text-sm sm:text-base">{{
+                                            ability.ability.name.replace(
+                                                "-",
+                                                " ",
+                                            )
+                                        }}</span>
                                         <span
                                             v-if="ability.is_hidden"
                                             class="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded-full w-fit"
+                                            >Hidden</span
                                         >
-                                            Hidden
-                                        </span>
                                     </h4>
                                     <p class="text-xs sm:text-sm text-gray-600">
                                         Slot {{ ability.slot }}
@@ -415,10 +432,10 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
 
                     <!-- Sprites Tab -->
-                    <div v-if="activeTab === 'sprites'" class="space-y-6">
+                    <section v-if="activeTab === 'sprites'" class="space-y-6">
                         <div>
                             <h3
                                 class="text-lg sm:text-xl font-semibold mb-6 flex items-center gap-2"
@@ -434,9 +451,7 @@
                                 class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-8"
                             >
                                 <div
-                                    v-for="(sprite, name) in getMainSprites(
-                                        pokemonData.pokemon,
-                                    )"
+                                    v-for="(sprite, name) in mainSprites"
                                     :key="name"
                                     class="text-center"
                                 >
@@ -467,7 +482,7 @@
                             </div>
 
                             <!-- Shiny Sprites -->
-                            <div v-if="hasShiny(pokemonData.pokemon)">
+                            <div v-if="shinyAvailable">
                                 <h4
                                     class="text-base sm:text-lg font-semibold mb-4 flex items-center gap-2"
                                 >
@@ -478,11 +493,7 @@
                                     class="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4"
                                 >
                                     <div
-                                        v-for="(
-                                            sprite, name
-                                        ) in getShinySprites(
-                                            pokemonData.pokemon,
-                                        )"
+                                        v-for="(sprite, name) in shinySprites"
                                         :key="name"
                                         class="text-center"
                                     >
@@ -513,7 +524,7 @@
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
                 </div>
             </div>
         </div>
@@ -521,7 +532,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+/*
+  Refactored for easier debugging and easier access:
+  - Organized state & computed properties for clarity
+  - Added a debug panel (toggleable) showing pretty JSON
+  - Added route watcher to re-fetch when id changes
+  - Consolidated helper functions and added defensive guards
+  - Kept all original functionality and component API intact
+*/
+
+import { ref, computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import type { PokemonDetail } from "@/composables/usePokemon";
 import { usePokemonApi } from "@/composables/usePokemon";
@@ -535,7 +555,7 @@ import {
     Swords,
     MapPin,
     Zap,
-    ImageIcon as ImageIcon,
+    ImageIcon,
     Sparkles,
     ImageOff,
     AlertCircle,
@@ -546,12 +566,23 @@ const route = useRoute();
 const router = useRouter();
 const { getCompletePokemonData, loading, error } = usePokemonApi();
 
+// --- local state ---
 const pokemonData = ref<any>(null);
-const activeTab = ref("stats");
+// Strongly-typed tab identifiers to avoid assigning plain `string` values
+type TabId =
+    | "stats"
+    | "evolution"
+    | "moves"
+    | "abilities"
+    | "locations"
+    | "sprites";
+const activeTab = ref<TabId>("stats");
 const moveSearch = ref("");
 const showShiny = ref(false);
+const debug = ref(false); // toggle this to enable debug output and logging
 
-const tabs = [
+// tabs metadata (kept for template)
+const tabs: Array<{ id: TabId; label: string; icon: any }> = [
     { id: "stats", label: "Stats", icon: BarChart3 },
     { id: "evolution", label: "Evolution", icon: Shuffle },
     { id: "moves", label: "Moves", icon: Swords },
@@ -560,50 +591,115 @@ const tabs = [
     { id: "sprites", label: "Sprites", icon: ImageIcon },
 ];
 
-const filteredMoves = computed(() => {
-    if (!pokemonData.value?.pokemon.moves) return [];
+// --- derived / computed fields for easier access ---
+const pokemonName = computed(
+    () => pokemonData.value?.pokemon?.name || "Unknown",
+);
+const formattedId = computed(() => {
+    const id = pokemonData.value?.pokemon?.id;
+    return id ? `#${id.toString().padStart(4, "0")}` : "#0000";
+});
 
-    const search = moveSearch.value.toLowerCase();
-    return pokemonData.value.pokemon.moves.filter((move: any) =>
-        move.move.name.toLowerCase().includes(search),
+const types = computed(() => {
+    return (pokemonData.value?.pokemon?.types || []).map(
+        (t: any) => t.type.name,
     );
 });
 
-onMounted(async () => {
-    const pokemonId = route.params.id as string;
-    if (pokemonId) {
-        pokemonData.value = await getCompletePokemonData(pokemonId);
-    }
+const stats = computed(() => pokemonData.value?.pokemon?.stats || []);
+const moves = computed(() => pokemonData.value?.pokemon?.moves || []);
+const abilities = computed(() => pokemonData.value?.pokemon?.abilities || []);
+const locations = computed(() => pokemonData.value?.locations || []);
+
+const shinyAvailable = computed(() => {
+    const p = pokemonData.value?.pokemon;
+    return !!(
+        p?.sprites?.front_shiny ||
+        p?.sprites?.other?.["official-artwork"]?.front_shiny
+    );
 });
 
-function goBack() {
-    router.go(-1);
-}
-
-function formatPokemonId(id: number): string {
-    return `#${id.toString().padStart(4, "0")}`;
-}
-
-function getMainImage(pokemon: PokemonDetail): string {
+const mainImage = computed(() => {
+    const p: PokemonDetail | undefined = pokemonData.value?.pokemon;
+    if (!p) return "";
     if (showShiny.value) {
         return (
-            pokemon.sprites.other?.["official-artwork"]?.front_shiny ||
-            pokemon.sprites.front_shiny ||
-            pokemon.sprites.other?.["official-artwork"]?.front_default ||
-            pokemon.sprites.front_default ||
-            `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${pokemon.id}.png`
+            p.sprites.other?.["official-artwork"]?.front_shiny ||
+            p.sprites.front_shiny ||
+            p.sprites.other?.["official-artwork"]?.front_default ||
+            p.sprites.front_default ||
+            `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${p.id}.png`
         );
     }
 
     return (
-        pokemon.sprites.other?.["official-artwork"]?.front_default ||
-        pokemon.sprites.versions?.["generation-v"]?.["black-white"]?.animated
+        p.sprites.other?.["official-artwork"]?.front_default ||
+        p.sprites.versions?.["generation-v"]?.["black-white"]?.animated
             ?.front_default ||
-        pokemon.sprites.front_default ||
-        `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${pokemon.id}.png`
+        p.sprites.front_default ||
+        `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${p.id}.png`
     );
-}
+});
 
+const mainSprites = computed(() => {
+    const p = pokemonData.value?.pokemon;
+    if (!p) return {};
+    return {
+        front_default: p.sprites.front_default,
+        back_default: p.sprites.back_default,
+        front_female: p.sprites.front_female,
+        back_female: p.sprites.back_female,
+    };
+});
+
+const shinySprites = computed(() => {
+    const p = pokemonData.value?.pokemon;
+    if (!p) return {};
+    return {
+        front_shiny: p.sprites.front_shiny,
+        back_shiny: p.sprites.back_shiny,
+        front_shiny_female: p.sprites.front_shiny_female,
+        back_shiny_female: p.sprites.back_shiny_female,
+    };
+});
+
+const heightMeters = computed(() => {
+    const h = pokemonData.value?.pokemon?.height;
+    return h ? (h / 10).toFixed(1) : "0.0";
+});
+
+const weightKg = computed(() => {
+    const w = pokemonData.value?.pokemon?.weight;
+    return w ? (w / 10).toFixed(1) : "0.0";
+});
+
+const baseExp = computed(
+    () => pokemonData.value?.pokemon?.base_experience ?? "N/A",
+);
+
+const genus = computed(() => {
+    const gens = pokemonData.value?.species?.genera || [];
+    const englishGenus = gens.find((g: any) => g.language?.name === "en");
+    return englishGenus?.genus || "Unknown";
+});
+
+const totalStats = computed(() => {
+    return stats.value.reduce(
+        (acc: number, s: any) => acc + (s.base_stat || 0),
+        0,
+    );
+});
+
+// --- filtered moves for the Moves tab ---
+const filteredMoves = computed(() => {
+    const search = moveSearch.value.trim().toLowerCase();
+    if (!search) return moves.value;
+    return moves.value.filter((m: any) =>
+        m.move.name.toLowerCase().includes(search),
+    );
+});
+
+// --- helpers (kept small & testable) ---
 function getTypeColor(type: string): string {
     const colors: Record<string, string> = {
         normal: "bg-gray-400",
@@ -647,50 +743,74 @@ function getStatColor(value: number): string {
     return "bg-red-500";
 }
 
-function getTotalStats(): number {
-    if (!pokemonData.value?.pokemon.stats) return 0;
-    return pokemonData.value.pokemon.stats.reduce(
-        (total: number, stat: any) => total + stat.base_stat,
-        0,
-    );
-}
-
-function getPokemonGenus(): string {
-    if (!pokemonData.value?.species?.genera) return "Unknown";
-    const englishGenus = pokemonData.value.species.genera.find(
-        (g: any) => g.language.name === "en",
-    );
-    return englishGenus?.genus || "Unknown";
-}
-
-function hasShiny(pokemon: PokemonDetail): boolean {
-    return !!(
-        pokemon.sprites.front_shiny ||
-        pokemon.sprites.other?.["official-artwork"]?.front_shiny
-    );
+function statBarWidth(value: number): string {
+    const percent = Math.min((value / 200) * 100, 100);
+    return `${percent}%`;
 }
 
 function toggleShiny() {
     showShiny.value = !showShiny.value;
 }
 
-function getMainSprites(pokemon: PokemonDetail) {
-    return {
-        front_default: pokemon.sprites.front_default,
-        back_default: pokemon.sprites.back_default,
-        front_female: pokemon.sprites.front_female,
-        back_female: pokemon.sprites.back_female,
-    };
+function goBack() {
+    router.go(-1);
 }
 
-function getShinySprites(pokemon: PokemonDetail) {
-    return {
-        front_shiny: pokemon.sprites.front_shiny,
-        back_shiny: pokemon.sprites.back_shiny,
-        front_shiny_female: pokemon.sprites.front_shiny_female,
-        back_shiny_female: pokemon.sprites.back_shiny_female,
-    };
+function toggleDebug() {
+    debug.value = !debug.value;
+    if (debug.value)
+        console.debug("Debug enabled for PokemonDetails", {
+            pokemonData: pokemonData.value,
+        });
 }
+
+function tabButtonClass(id: TabId) {
+    return activeTab.value === id
+        ? "border-blue-500 text-blue-600"
+        : "border-transparent text-gray-500 hover:text-gray-700";
+}
+
+function safePrettyJson(obj: any) {
+    try {
+        return JSON.stringify(obj, null, 2);
+    } catch (e) {
+        return String(obj);
+    }
+}
+
+// --- data fetching ---
+async function fetchPokemon(pokemonId: string | number) {
+    if (!pokemonId) return;
+    try {
+        if (debug.value) console.debug(`Fetching pokemon ${pokemonId}`);
+        pokemonData.value = await getCompletePokemonData(String(pokemonId));
+        if (debug.value)
+            console.debug("Fetched pokemonData", pokemonData.value);
+    } catch (err) {
+        // bubble up to the composable's error state; keep local logging for debugging
+        console.error("Failed to fetch pokemon:", err);
+        // keep pokemonData null on error to show error state handled by composable
+        pokemonData.value = null;
+    }
+}
+
+onMounted(() => {
+    const id = route.params.id as string | undefined;
+    if (id) fetchPokemon(id);
+});
+
+// refetch when route param changes (useful during navigation)
+watch(
+    () => route.params.id,
+    (newId, oldId) => {
+        if (newId && newId !== oldId) {
+            fetchPokemon(String(newId));
+            // return to default tab and clear search for clarity when debugging
+            activeTab.value = "stats";
+            moveSearch.value = "";
+        }
+    },
+);
 </script>
 
 <style scoped>

@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import Dashboard from "@/views/Dashboard.vue";
-import PokemonDetails from "@/views/PokemonDetails.vue";
+import { PokemonDetails } from "@/views/PokemonDetails";
 
 const routes = [
   {
