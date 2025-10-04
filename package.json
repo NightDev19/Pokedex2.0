@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:check": "vue-tsc --noEmit --watch",
+    "dev:all": "npm-run-all -p dev dev:check",
     "test": "vitest",
     "build": "vue-tsc -b && vite build",
     "test-and-build": "npm run build && npm run test",
@@ -32,6 +34,7 @@
     "@vue/tsconfig": "^0.7.0",
     "typescript": "~5.8.3",
     "vite": "^7.1.2",
+    "vite-plugin-checker": "^0.11.0",
     "vitest": "^3.2.4",
     "vue-tsc": "^3.0.5"
   }
