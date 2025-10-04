@@ -145,8 +145,8 @@ let searchTimeout: NodeJS.Timeout;
 
 // Pagination state
 const currentPage = ref(1);
-const itemsPerPage = 20;
 const isSearchMode = ref(false);
+const displayCount = ref(20); // Track how many items to display
 
 // Placeholder for unloaded images
 const placeholder =
@@ -159,7 +159,7 @@ const loadingImages = new Set<number>();
 // Computed properties
 const canLoadMore = computed(() => {
     if (isSearchMode.value) return false;
-    return displayList.value.length < (total.value || 1000) && !loading.value;
+    return displayCount.value < (total.value || 1000) && !loading.value;
 });
 
 // Lifecycle
@@ -177,7 +177,7 @@ onUnmounted(() => {
 // Watchers
 watch(pokemons, (newVal) => {
     if (!isSearchMode.value) {
-        displayList.value = newVal.slice();
+        displayList.value = newVal.slice(0, displayCount.value);
     }
 });
 
@@ -254,7 +254,10 @@ async function loadImage(pokemon: PokemonSummary): Promise<void> {
 
 // Batch load images for visible items
 async function loadVisibleImages() {
-    const visiblePokemon = displayList.value.slice(0, 40); // Load first 40 images
+    const visiblePokemon = displayList.value.slice(
+        Math.max(0, displayList.value.length - 60),
+        displayList.value.length,
+    ); // Load last 60 images (3 pages worth)
     const promises = visiblePokemon.map(loadImage);
     await Promise.allSettled(promises);
 }
@@ -296,24 +299,35 @@ function setupIntersectionObserver() {
 // --- Data Loading ---
 async function loadInitialData() {
     currentPage.value = 1;
-    await list(1, itemsPerPage);
-    displayList.value = pokemons.value.slice();
+    displayCount.value = 20;
+    // Load all pokemon at once (or a large chunk)
+    await list(1, 1000); // Load 1000 items to have all data
+    displayList.value = pokemons.value.slice(0, displayCount.value);
     await loadVisibleImages();
 }
 
 async function loadMore() {
     if (loading.value || isSearchMode.value) return;
 
-    currentPage.value += 1;
-    await list(currentPage.value, itemsPerPage);
+    // Just increase display count without fetching new pages
+    displayCount.value += 20;
 
-    const currentIds = new Set(displayList.value.map((p) => p.id));
-    const newItems = pokemons.value.filter((p) => !currentIds.has(p.id));
-    displayList.value.push(...newItems);
+    // Update display list to show more items
+    displayList.value = pokemons.value.slice(0, displayCount.value);
 
     await nextTick();
-    const newCards = gridRef.value?.querySelectorAll("[data-pokemon-id]");
-    newCards?.forEach((card) => observer?.observe(card));
+
+    // Re-observe all cards (including new ones)
+    if (observer && gridRef.value) {
+        const allCards = gridRef.value.querySelectorAll("[data-pokemon-id]");
+        allCards.forEach((card) => {
+            observer?.unobserve(card);
+            observer?.observe(card);
+        });
+    }
+
+    // Load visible images for newly added items
+    await loadVisibleImages();
 }
 
 // --- Search Functions ---
@@ -345,8 +359,9 @@ async function onSearch() {
 async function onSearchClear() {
     isSearchMode.value = false;
     currentPage.value = 1;
-    await list(1, itemsPerPage);
-    displayList.value = pokemons.value.slice();
+    displayCount.value = 20;
+    await list(1, 1000);
+    displayList.value = pokemons.value.slice(0, displayCount.value);
     await loadVisibleImages();
 }
 
